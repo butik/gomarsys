@@ -1,0 +1,10 @@
+language: go
+
+sudo: false
+
+before_script:
+- go get -t ./...
+
+script:
+- go vet ./...
+- go test -v -race ./...
