@@ -22,6 +22,7 @@ const (
 	ZIPCode
 	Country
 	Phone
+	OptIn = 31
 )
 
 type Users struct {
@@ -32,6 +33,33 @@ type User struct {
 	SourceID int
 	Data     map[int]string
 }
+
+type ChangesRequest struct {
+	DistributionMethod  string   `json:"distribution_method"`
+	Origin              string   `json:"origin"`
+	TimeRange           []string `json:"time_range"`
+	OriginID            string   `json:"origin_id"`
+	ContactFields       []int    `json:"contact_fields"`
+	Delimiter           string   `json:"delimiter"`
+	AddFieldNamesHeader int      `json:"add_field_names_header"`
+}
+
+type Changes struct {
+	ReplyCode int    `json:"replyCode"`
+	ReplyText string `json:"replyText"`
+	Data      struct {
+		ID int `json:"id"`
+	} `json:"data"`
+}
+
+type ChangesResponse struct {
+}
+
+const (
+	DistributionMethodLocal = "local"
+
+	OriginAll = "all"
+)
 
 func NewUsers(client ClientInterface) *Users {
 	return &Users{
@@ -71,4 +99,30 @@ func (u *Users) Create(user User, keyID int) error {
 	}
 
 	return nil
+}
+
+func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
+	data, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &Request{
+		Path:   "/v2/contact/getchanges",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	status := &Changes{}
+
+	if response, err := u.client.Send(r); err != nil {
+		return nil, err
+	} else {
+		err := json.Unmarshal(response, status)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return status, nil
 }
