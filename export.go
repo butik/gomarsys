@@ -71,7 +71,7 @@ func (e *Export) DownloadExportData(id int) ([][]string, error) {
 		r := csv.NewReader(strings.NewReader(string(response)))
 		data, err := r.ReadAll()
 		if err != nil {
-			return [][]string{}, err
+			return nil, err
 		}
 
 		return data, nil
