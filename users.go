@@ -52,6 +52,15 @@ type Changes struct {
 	} `json:"data"`
 }
 
+type UserData struct {
+	ReplyCode int    `json:"replyCode"`
+	ReplyText string `json:"replyText"`
+	Data      struct {
+		Errors []string            `json:"errors"`
+		Result []map[string]string `json:"result"`
+	} `json:"data"`
+}
+
 type ChangesResponse struct {
 }
 
@@ -99,6 +108,48 @@ func (u *Users) Create(user User, keyID int) error {
 	}
 
 	return nil
+}
+
+func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*UserData, error) {
+	type request struct {
+		KeyID     string   `json:"keyId"`
+		KeyValues []string `json:"keyValues"`
+		Fields    []string `json:"fields"`
+	}
+
+	var stringFields []string
+	for _, f := range fields {
+		stringFields = append(stringFields, fmt.Sprintf("%d", f))
+	}
+
+	pr := &request{
+		KeyID:     fmt.Sprintf("%d", keyID),
+		KeyValues: []string{keyValue},
+		Fields:    stringFields,
+	}
+
+	data, err := json.Marshal(pr)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &Request{
+		Path:   "/v2/contact/getdata",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	userData := &UserData{}
+
+	if response, err := u.client.Send(r); err != nil {
+		return nil, err
+	} else {
+		if err := json.Unmarshal(response, userData); err != nil {
+			return nil, err
+		}
+	}
+
+	return userData, nil
 }
 
 func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
