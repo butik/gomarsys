@@ -29,6 +29,7 @@ const host = "https://api.emarsys.net/api/"
 const (
 	requestPost = iota + 1
 	requestGet
+	requestPut
 )
 
 type RequestMethod int
@@ -66,6 +67,8 @@ func (c *Client) Send(r *Request) ([]byte, error) {
 		method = "POST"
 	case requestGet:
 		method = "GET"
+	case requestPut:
+		method = "PUT"
 	default:
 		return nil, fmt.Errorf("unknown method: %d", r.Method)
 	}

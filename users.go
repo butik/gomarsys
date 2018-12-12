@@ -3,6 +3,7 @@ package gomarsys
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 )
 
 const (
@@ -23,6 +24,10 @@ const (
 	Country
 	Phone
 	OptIn = 31
+)
+
+const (
+	ErrorCodeContactNotFound = 2008
 )
 
 type Users struct {
@@ -52,15 +57,6 @@ type Changes struct {
 	} `json:"data"`
 }
 
-type UserData struct {
-	ReplyCode int    `json:"replyCode"`
-	ReplyText string `json:"replyText"`
-	Data      struct {
-		Errors []string            `json:"errors"`
-		Result []map[string]string `json:"result"`
-	} `json:"data"`
-}
-
 type ChangesResponse struct {
 }
 
@@ -69,6 +65,19 @@ const (
 
 	OriginAll = "all"
 )
+
+type UserError struct {
+	code    int
+	message string
+}
+
+func (e *UserError) Error() string {
+	return e.message
+}
+
+func (e *UserError) Code() int {
+	return e.code
+}
 
 func NewUsers(client ClientInterface) *Users {
 	return &Users{
@@ -110,7 +119,41 @@ func (u *Users) Create(user User, keyID int) error {
 	return nil
 }
 
-func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*UserData, error) {
+func (u *Users) UpdateUser(user User, keyID int) error {
+	type request struct {
+		KeyID    string              `json:"key_id"`
+		Contacts []map[string]string `json:"contacts"`
+	}
+
+	pr := &request{
+		KeyID: fmt.Sprintf("%d", keyID),
+	}
+
+	m := make(map[string]string)
+	for key, val := range user.Data {
+		m[fmt.Sprintf("%d", key)] = val
+	}
+	pr.Contacts = append(pr.Contacts, m)
+
+	data, err := json.Marshal(pr)
+	if err != nil {
+		return err
+	}
+
+	r := &Request{
+		Path:   "/v2/contact",
+		Method: requestPut,
+		Body:   data,
+	}
+
+	if _, err := u.client.Send(r); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, error) {
 	type request struct {
 		KeyID     string   `json:"keyId"`
 		KeyValues []string `json:"keyValues"`
@@ -130,7 +173,7 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*UserData
 
 	data, err := json.Marshal(pr)
 	if err != nil {
-		return nil, err
+		return nil, &UserError{message: err.Error()}
 	}
 
 	r := &Request{
@@ -139,17 +182,54 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*UserData
 		Body:   data,
 	}
 
-	userData := &UserData{}
+	user := &User{}
+	user.Data = make(map[int]string)
+
+	var userData struct {
+		ReplyCode int    `json:"replyCode"`
+		ReplyText string `json:"replyText"`
+		Data      struct {
+			Errors []struct {
+				Key       string `json:"key"`
+				ErrorCode int    `json:"errorCode"`
+				ErrorMsg  string `json:"errorMsg"`
+			} `json:"errors"`
+			Result interface{} `json:"result,omitempty"`
+		} `json:"data"`
+	}
 
 	if response, err := u.client.Send(r); err != nil {
-		return nil, err
+		return nil, &UserError{message: err.Error()}
 	} else {
-		if err := json.Unmarshal(response, userData); err != nil {
-			return nil, err
+		if err := json.Unmarshal(response, &userData); err != nil {
+			return nil, &UserError{message: err.Error()}
 		}
 	}
 
-	return userData, nil
+	if len(userData.Data.Errors) > 0 {
+		return user, &UserError{message: userData.Data.Errors[0].ErrorMsg, code: userData.Data.Errors[0].ErrorCode}
+	}
+
+	if users, ok := userData.Data.Result.([]interface{}); ok && len(userData.Data.Result.([]interface{})) > 0 {
+		for key, value := range users[0].(map[string]interface{}) {
+			if key == "uid" || key == "id" {
+				continue
+			}
+
+			field, err := strconv.Atoi(key)
+			if err != nil {
+				return nil, &UserError{message: err.Error()}
+			}
+
+			if v, ok := value.(string); ok {
+				user.Data[field] = v
+			}
+		}
+
+		return user, nil
+	}
+
+	return nil, &UserError{message: "empty user response"}
 }
 
 func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
