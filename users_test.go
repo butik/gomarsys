@@ -38,6 +38,31 @@ func TestUsers_Create(t *testing.T) {
 	}, EMail)
 }
 
+func TestUsers_GetUserInfo(t *testing.T) {
+	client := NewClientMock()
+	client.(*ClientMock).On("Send", mock.Anything).Run(func(args mock.Arguments) {
+		req := args.Get(0).(*Request)
+
+		assert.Equal(t, req.Path, "/v2/contact/getdata")
+		assert.Equal(t, req.Method, RequestMethod(requestPost))
+		var v interface{}
+		err := json.NewDecoder(strings.NewReader(string(req.Body))).Decode(&v)
+		require.NoError(t, err)
+
+		assert.Equal(t, v.(map[string]interface{})["keyId"], fmt.Sprintf("%d", EMail))
+		assert.Equal(t, v.(map[string]interface{})["keyValues"].([]interface{})[0].(string), "test@test.ru")
+		assert.Equal(t, v.(map[string]interface{})["fields"].([]interface{})[0].(string), fmt.Sprintf("%d", EMail))
+		assert.Equal(t, v.(map[string]interface{})["fields"].([]interface{})[1].(string), fmt.Sprintf("%d", Gender))
+	}).Return([]byte(`{"replyCode":0,"replyText":"OK","data":{"errors":[],"result":[{"3":"test@test.ru","5":"2","id":"111111","uid":"fd90tidfpd"}]}}`), nil)
+
+	user := NewUsers(client)
+	userData, err := user.GetUserInfo(EMail, "test@test.ru", []int{EMail, Gender})
+	require.NoError(t, err)
+
+	assert.Equal(t, userData.Data.Result[0][fmt.Sprintf("%d", Gender)], "2")
+	assert.Equal(t, userData.Data.Result[0][fmt.Sprintf("%d", EMail)], "test@test.ru")
+}
+
 func TestUsers_GetChanges(t *testing.T) {
 	client := NewClientMock()
 	client.(*ClientMock).On("Send", mock.Anything).Run(func(args mock.Arguments) {
