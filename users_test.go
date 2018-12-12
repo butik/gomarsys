@@ -38,6 +38,33 @@ func TestUsers_Create(t *testing.T) {
 	}, EMail)
 }
 
+func TestUsers_UpdateUser(t *testing.T) {
+	client := NewClientMock()
+	client.(*ClientMock).On("Send", mock.Anything).Run(func(args mock.Arguments) {
+		req := args.Get(0).(*Request)
+
+		assert.Equal(t, req.Path, "/v2/contact")
+		assert.Equal(t, req.Method, RequestMethod(requestPut))
+		var v interface{}
+		err := json.NewDecoder(strings.NewReader(string(req.Body))).Decode(&v)
+		require.NoError(t, err)
+
+		assert.Equal(t, v.(map[string]interface{})["key_id"], fmt.Sprintf("%d", EMail))
+		assert.Equal(t, v.(map[string]interface{})["contacts"].([]interface{})[0].(map[string]interface{})[fmt.Sprintf("%d", FirstName)], "Test")
+		assert.Equal(t, v.(map[string]interface{})["contacts"].([]interface{})[0].(map[string]interface{})[fmt.Sprintf("%d", LastName)], "Test")
+		assert.Equal(t, v.(map[string]interface{})["contacts"].([]interface{})[0].(map[string]interface{})[fmt.Sprintf("%d", EMail)], "test@test.ru")
+	}).Return([]byte{}, nil)
+
+	user := NewUsers(client)
+	user.UpdateUser(User{
+		Data: map[int]string{
+			FirstName: "Test",
+			LastName:  "Test",
+			EMail:     "test@test.ru",
+		},
+	}, EMail)
+}
+
 func TestUsers_GetUserInfo(t *testing.T) {
 	client := NewClientMock()
 	client.(*ClientMock).On("Send", mock.Anything).Run(func(args mock.Arguments) {
@@ -59,8 +86,8 @@ func TestUsers_GetUserInfo(t *testing.T) {
 	userData, err := user.GetUserInfo(EMail, "test@test.ru", []int{EMail, Gender})
 	require.NoError(t, err)
 
-	assert.Equal(t, userData.Data.Result[0][fmt.Sprintf("%d", Gender)], "2")
-	assert.Equal(t, userData.Data.Result[0][fmt.Sprintf("%d", EMail)], "test@test.ru")
+	assert.Equal(t, userData.Data[Gender], "2")
+	assert.Equal(t, userData.Data[EMail], "test@test.ru")
 }
 
 func TestUsers_GetChanges(t *testing.T) {
