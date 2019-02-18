@@ -9,10 +9,19 @@ type ExternalEvents struct {
 	client ClientInterface
 }
 
-type TriggerEvent struct {
-	KeyID      int               `json:"key_id"`
+type EventData struct {
 	ExternalID string            `json:"external_id"`
 	Data       map[string]string `json:"data"`
+}
+
+type TriggerBatchEvent struct {
+	KeyID    int         `json:"key_id"`
+	Contacts []EventData `json:"contacts"`
+}
+
+type TriggerEvent struct {
+	EventData
+	KeyID int `json:"key_id"`
 }
 
 func NewExternalEvents(client ClientInterface) *ExternalEvents {
@@ -21,7 +30,7 @@ func NewExternalEvents(client ClientInterface) *ExternalEvents {
 	}
 }
 
-func (e *ExternalEvents) TriggerEvent(eventId int, event TriggerEvent) error {
+func (e *ExternalEvents) TriggerEvent(eventId int, event interface{}) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return err
