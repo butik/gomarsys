@@ -199,7 +199,7 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, er
 	}
 
 	if response, err := u.client.Send(r); err != nil {
-		return nil, &UserError{message: err.Error()}
+		return nil, err
 	} else {
 		if err := json.Unmarshal(response, &userData); err != nil {
 			return nil, &UserError{message: err.Error()}
