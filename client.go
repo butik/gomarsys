@@ -34,6 +34,18 @@ const (
 
 type RequestMethod int
 
+type ClientError struct {
+	err error
+}
+
+func (clientError *ClientError) Error() string {
+	return clientError.err.Error()
+}
+
+func newClientError(err error) error {
+	return &ClientError{err}
+}
+
 type Client struct {
 	auth auth
 	host string
@@ -87,7 +99,7 @@ func (c *Client) Send(r *Request) ([]byte, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, newClientError(err)
 	}
 
 	defer resp.Body.Close()
