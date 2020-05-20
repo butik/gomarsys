@@ -153,6 +153,87 @@ func (u *Users) UpdateUser(user User, keyID int) error {
 	return nil
 }
 
+// Delete implements call to delete contact emarsys api method
+// https://dev.emarsys.com/v2/contacts/delete-contact
+func (u *Users) Delete(keyID int, keyValue string) error {
+	keyIDString := strconv.Itoa(keyID)
+	pr := map[string]string{
+		"key_id":    keyIDString,
+		keyIDString: keyValue,
+	}
+
+	data, err := json.Marshal(pr)
+	if err != nil {
+		return &UserError{message: err.Error()}
+	}
+
+	r := &Request{
+		Path:   "/v2/contact/delete",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	var res struct {
+		ReplyCode int    `json:"replyCode"`
+		ReplyText string `json:"replyText"`
+		Data      struct {
+			Errors          json.RawMessage `json:"errors"`
+			DeletedContacts uint8           `json:"deleted_contacts"`
+		} `json:"data"`
+	}
+
+	if response, err := u.client.Send(r); err != nil {
+		return err
+	} else {
+		if err := json.Unmarshal(response, &res); err != nil {
+			return &UserError{message: err.Error()}
+		}
+	}
+
+	err = u.handleDeleteErrors(res.Data.Errors)
+	if err != nil {
+		return err
+	}
+
+	if res.Data.DeletedContacts == 0 {
+		return &UserError{message: fmt.Sprintf("DeletedContacts count is 0. keyID: '%d'; keyValue: '%s'", keyID, keyValue)}
+	}
+
+	return nil
+}
+
+func (u *Users) handleDeleteErrors(errorsContent json.RawMessage) error {
+
+	// Response example:  `{"replyCode":0,"replyText":"OK","data":{"errors":{"":{"2005":"No value provided for key field: 3"}},"deleted_contacts":0}}`
+	var errorSlice []struct {
+		Key       string `json:"key"`
+		ErrorCode int    `json:"errorCode"`
+		ErrorMsg  string `json:"errorMsg"`
+	}
+
+	// Response example: `{"replyCode":0,"replyText":"OK","data":{"errors":[],"deleted_contacts":1}}`
+	var errorMap map[string]map[string]string
+
+	if err := json.Unmarshal(errorsContent, &errorSlice); err == nil {
+		if len(errorSlice) > 0 {
+			return &UserError{message: errorSlice[0].ErrorMsg, code: errorSlice[0].ErrorCode}
+		}
+	} else if err := json.Unmarshal(errorsContent, &errorMap); err == nil {
+		if len(errorMap) > 0 {
+			for _, errorList := range errorMap {
+				for errorCodeString, errorMessage := range errorList {
+					errorCode, _ := strconv.Atoi(errorCodeString)
+					return &UserError{message: errorMessage, code: errorCode}
+				}
+			}
+		}
+	} else {
+		return &UserError{message: fmt.Sprintf("unknown format of errors in delete response: '%s'", string(errorsContent))}
+	}
+
+	return nil
+}
+
 func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, error) {
 	type request struct {
 		KeyID     string   `json:"keyId"`
