@@ -85,8 +85,8 @@ func (c *Client) Send(r *Request) ([]byte, error) {
 		return nil, fmt.Errorf("unknown method: %d", r.Method)
 	}
 
-	serverUrl, _ := url.Parse(c.host)
-	serverUrl.Path += strings.TrimLeft(r.Path, "/")
+	serverUrl, _ := url.Parse(c.host + strings.Trim(r.Path, "/"))
+	serverUrl.Path += "/"
 
 	req, err := http.NewRequest(method, serverUrl.String(), bytes.NewBuffer(r.Body))
 	if err != nil {

@@ -3,6 +3,7 @@ package gomarsys
 import (
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strconv"
 )
 
@@ -35,8 +36,23 @@ type Users struct {
 }
 
 type User struct {
-	SourceID int
+	ID       string
+	SourceID string
 	Data     map[int]string
+}
+
+func (u *User) Clone() *User {
+	clone := &User{
+		ID:       u.ID,
+		SourceID: u.SourceID,
+	}
+
+	clone.Data = make(map[int]string, len(u.Data))
+	for id, value := range u.Data {
+		clone.Data[id] = value
+	}
+
+	return clone
 }
 
 type ChangesRequest struct {
@@ -203,7 +219,6 @@ func (u *Users) Delete(keyID int, keyValue string) error {
 }
 
 func (u *Users) handleDeleteErrors(errorsContent json.RawMessage) error {
-
 	// Response example:  `{"replyCode":0,"replyText":"OK","data":{"errors":{"":{"2005":"No value provided for key field: 3"}},"deleted_contacts":0}}`
 	var errorSlice []struct {
 		Key       string `json:"key"`
@@ -235,6 +250,10 @@ func (u *Users) handleDeleteErrors(errorsContent json.RawMessage) error {
 }
 
 func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, error) {
+	return u.GetUserInfoByKey(strconv.Itoa(keyID), keyValue, fields)
+}
+
+func (u *Users) GetUserInfoByKey(key, keyValue string, fields []int) (*User, error) {
 	type request struct {
 		KeyID     string   `json:"keyId"`
 		KeyValues []string `json:"keyValues"`
@@ -247,7 +266,7 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, er
 	}
 
 	pr := &request{
-		KeyID:     fmt.Sprintf("%d", keyID),
+		KeyID:     key,
 		KeyValues: []string{keyValue},
 		Fields:    stringFields,
 	}
@@ -263,8 +282,81 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, er
 		Body:   data,
 	}
 
+	var userData struct {
+		ReplyCode int    `json:"replyCode"`
+		ReplyText string `json:"replyText"`
+		Data      struct {
+			Errors []struct {
+				Key       string `json:"key"`
+				ErrorCode int    `json:"errorCode"`
+				ErrorMsg  string `json:"errorMsg"`
+			} `json:"errors"`
+			Result json.RawMessage `json:"result,omitempty"`
+		} `json:"data"`
+	}
+
+	if response, err := u.client.Send(r); err != nil {
+		return nil, err
+	} else {
+		if err := json.Unmarshal(response, &userData); err != nil {
+			return nil, &UserError{message: err.Error()}
+		}
+	}
+
 	user := &User{}
 	user.Data = make(map[int]string)
+
+	if len(userData.Data.Errors) > 0 {
+		return user, &UserError{message: userData.Data.Errors[0].ErrorMsg, code: userData.Data.Errors[0].ErrorCode}
+	}
+
+	var result []map[string]*string
+	if err := json.Unmarshal(userData.Data.Result, &result); err != nil {
+		return nil, &UserError{message: "empty user response"}
+	}
+
+	if len(userData.Data.Result) == 0 {
+		return nil, &UserError{message: "empty user response"}
+	}
+
+	for key, value := range result[0] {
+		if key == "id" && value != nil {
+			user.ID = *value
+		}
+		if key == "uid" || key == "id" {
+			continue
+		}
+
+		field, err := strconv.Atoi(key)
+		if err != nil {
+			return nil, &UserError{message: fmt.Errorf("cannot parse key '%s': %w", key, err).Error()}
+		}
+
+		if value != nil {
+			user.Data[field] = *value
+		}
+	}
+
+	return user, nil
+}
+
+func (u *Users) ListUserIDs(keyID int, keyValue string) ([]string, error) {
+	query := url.Values{}
+	key := strconv.Itoa(keyID)
+
+	query.Set("return", key)
+	query.Set(key, keyValue)
+	query.Set("excludeempty", "false")
+
+	path := &url.URL{
+		Path:     "/v2/contact/query",
+		RawQuery: query.Encode(),
+	}
+
+	r := &Request{
+		Path:   path.String(),
+		Method: requestGet,
+	}
 
 	var userData struct {
 		ReplyCode int    `json:"replyCode"`
@@ -275,7 +367,9 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, er
 				ErrorCode int    `json:"errorCode"`
 				ErrorMsg  string `json:"errorMsg"`
 			} `json:"errors"`
-			Result interface{} `json:"result,omitempty"`
+			Result []struct {
+				ID string `json:"id"`
+			} `json:"result,omitempty"`
 		} `json:"data"`
 	}
 
@@ -288,29 +382,72 @@ func (u *Users) GetUserInfo(keyID int, keyValue string, fields []int) (*User, er
 	}
 
 	if len(userData.Data.Errors) > 0 {
-		return user, &UserError{message: userData.Data.Errors[0].ErrorMsg, code: userData.Data.Errors[0].ErrorCode}
+		return nil, &UserError{message: userData.Data.Errors[0].ErrorMsg, code: userData.Data.Errors[0].ErrorCode}
 	}
 
-	if users, ok := userData.Data.Result.([]interface{}); ok && len(userData.Data.Result.([]interface{})) > 0 {
-		for key, value := range users[0].(map[string]interface{}) {
-			if key == "uid" || key == "id" {
-				continue
-			}
-
-			field, err := strconv.Atoi(key)
-			if err != nil {
-				return nil, &UserError{message: err.Error()}
-			}
-
-			if v, ok := value.(string); ok {
-				user.Data[field] = v
-			}
-		}
-
-		return user, nil
+	ids := make([]string, len(userData.Data.Result))
+	for i, item := range userData.Data.Result {
+		ids[i] = item.ID
 	}
 
-	return nil, &UserError{message: "empty user response"}
+	if len(ids) == 0 {
+		return nil, &UserError{message: "empty response"}
+	}
+
+	return ids, nil
+}
+
+func (u *Users) MergeUsers(key string, sourceKeyValue, targetKeyValue string, overwriteFields []string) error {
+	type request struct {
+		KeyID          string            `json:"key_id"`
+		SourceKeyValue string            `json:"source_key_value"`
+		TargetKeyValue string            `json:"target_key_value"`
+		MergeRules     map[string]string `json:"merge_rules"`
+		DeleteSource   bool              `json:"delete_source"`
+	}
+
+	pr := &request{
+		KeyID:          key,
+		SourceKeyValue: sourceKeyValue,
+		TargetKeyValue: targetKeyValue,
+		MergeRules:     make(map[string]string, len(overwriteFields)),
+		DeleteSource:   true,
+	}
+
+	for _, field := range overwriteFields {
+		pr.MergeRules[field] = "overwrite"
+	}
+
+	data, err := json.Marshal(pr)
+	if err != nil {
+		return &UserError{message: err.Error()}
+	}
+
+	r := &Request{
+		Path:   "/v2/contact/merge",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	var userData struct {
+		ReplyCode int    `json:"replyCode"`
+		ReplyText string `json:"replyText"`
+	}
+
+	response, err := u.client.Send(r)
+	if err != nil {
+		return err
+	}
+
+	if err := json.Unmarshal(response, &userData); err != nil {
+		return &UserError{message: err.Error()}
+	}
+
+	if userData.ReplyCode != 0 {
+		return &UserError{message: fmt.Sprintf("error code returned from api: '%s'", response)}
+	}
+
+	return nil
 }
 
 func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
