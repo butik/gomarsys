@@ -53,6 +53,7 @@ func (e *Export) WaitExportComplete(ctx context.Context, jobID int) (*ExportStat
 	)
 
 	t := time.NewTicker(emarsysUpdateStatusPeriod)
+	defer t.Stop()
 
 	for {
 		select {
@@ -64,8 +65,6 @@ func (e *Export) WaitExportComplete(ctx context.Context, jobID int) (*ExportStat
 
 		status, err = e.CheckStatus(jobID)
 		if err != nil {
-			t.Stop()
-
 			return nil, err
 		}
 
