@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strconv"
+	"time"
 )
 
 const (
@@ -29,6 +30,10 @@ const (
 
 const (
 	ErrorCodeContactNotFound = 2008
+
+	PlatformOriginAll             = "all"
+	PlatformDefaultOriginID       = "0"
+	ExportDistributionMethodLocal = "local"
 )
 
 type Users struct {
@@ -55,17 +60,31 @@ func (u *User) Clone() *User {
 	return clone
 }
 
-type ChangesRequest struct {
-	DistributionMethod  string   `json:"distribution_method"`
-	Origin              string   `json:"origin"`
-	TimeRange           []string `json:"time_range"`
-	OriginID            string   `json:"origin_id"`
-	ContactFields       []int    `json:"contact_fields"`
-	Delimiter           string   `json:"delimiter"`
-	AddFieldNamesHeader int      `json:"add_field_names_header"`
+type BaseExportRequest struct {
+	DistributionMethod  string `json:"distribution_method"`
+	ContactFields       []int  `json:"contact_fields"`
+	Delimiter           string `json:"delimiter"`
+	AddFieldNamesHeader int    `json:"add_field_names_header"`
 }
 
-type Changes struct {
+type ChangesRequest struct {
+	BaseExportRequest
+	Origin    string   `json:"origin"`
+	TimeRange []string `json:"time_range"`
+	OriginID  string   `json:"origin_id"`
+}
+
+type ContactRequest struct {
+	BaseExportRequest
+	ContactListID int `json:"contactlist"`
+}
+
+type SegmentRequest struct {
+	BaseExportRequest
+	Filter int `json:"filter"`
+}
+
+type ExportResult struct {
 	ReplyCode int    `json:"replyCode"`
 	ReplyText string `json:"replyText"`
 	Data      struct {
@@ -450,7 +469,34 @@ func (u *Users) MergeUsers(key string, sourceKeyValue, targetKeyValue string, ov
 	return nil
 }
 
-func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
+func (u *Users) GetSegmentLocally(segmentID int, fields []int) (*ExportResult, error) {
+	return u.GetSegment(SegmentRequest{
+		BaseExportRequest: BaseExportRequest{
+			DistributionMethod:  ExportDistributionMethodLocal,
+			ContactFields:       fields,
+			AddFieldNamesHeader: 1,
+		},
+		Filter: segmentID,
+	})
+}
+
+func (u *Users) GetAllChangesLocally(startTime, endTime time.Time, fields []int) (*ExportResult, error) {
+	return u.GetChanges(ChangesRequest{
+		BaseExportRequest: BaseExportRequest{
+			DistributionMethod:  ExportDistributionMethodLocal,
+			ContactFields:       fields,
+			AddFieldNamesHeader: 1,
+		},
+		Origin: PlatformOriginAll,
+		TimeRange: []string{
+			startTime.Format(mysqlDateFormat),
+			endTime.Format(mysqlDateFormat),
+		},
+		OriginID: PlatformDefaultOriginID,
+	})
+}
+
+func (u *Users) GetChanges(request ChangesRequest) (*ExportResult, error) {
 	data, err := json.Marshal(request)
 	if err != nil {
 		return nil, err
@@ -462,7 +508,59 @@ func (u *Users) GetChanges(request ChangesRequest) (*Changes, error) {
 		Body:   data,
 	}
 
-	status := &Changes{}
+	status := &ExportResult{}
+
+	if response, err := u.client.Send(r); err != nil {
+		return nil, err
+	} else {
+		err := json.Unmarshal(response, status)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return status, nil
+}
+
+func (u *Users) GetContacts(request ContactRequest) (*ExportResult, error) {
+	data, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &Request{
+		Path:   "/v2/email/getcontacts",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	status := &ExportResult{}
+
+	if response, err := u.client.Send(r); err != nil {
+		return nil, err
+	} else {
+		err := json.Unmarshal(response, status)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	return status, nil
+}
+
+func (u *Users) GetSegment(request SegmentRequest) (*ExportResult, error) {
+	data, err := json.Marshal(request)
+	if err != nil {
+		return nil, err
+	}
+
+	r := &Request{
+		Path:   "/v2/export/filter",
+		Method: requestPost,
+		Body:   data,
+	}
+
+	status := &ExportResult{}
 
 	if response, err := u.client.Send(r); err != nil {
 		return nil, err

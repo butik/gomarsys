@@ -1,10 +1,13 @@
 package gomarsys
 
 import (
+	"context"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strings"
+	"time"
 )
 
 type Export struct {
@@ -13,10 +16,14 @@ type Export struct {
 
 const (
 	ExportStatusScheduled  = "scheduled"
-	ExportStatusInProgress = "in progress"
+	ExportStatusInProgress = "in_progress"
 	ExportStatusReady      = "ready"
 	ExportStatusDone       = "done"
 	ExportStatusError      = "error"
+
+	bufferSize = 512
+
+	emarsysUpdateStatusPeriod = time.Second * 10
 )
 
 type ExportStatus struct {
@@ -37,6 +44,41 @@ func NewExport(client ClientInterface) *Export {
 	return &Export{
 		client: client,
 	}
+}
+
+func (e *Export) WaitExportComplete(ctx context.Context, jobID int) (*ExportStatus, error) {
+	var (
+		status *ExportStatus
+		err    error
+	)
+
+	t := time.NewTicker(emarsysUpdateStatusPeriod)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-t.C:
+			break
+		}
+
+		status, err = e.CheckStatus(jobID)
+		if err != nil {
+			t.Stop()
+
+			return nil, err
+		}
+
+		if status.Data.Status == ExportStatusDone || status.Data.Status == ExportStatusError {
+			break
+		}
+	}
+
+	if status == nil {
+		return nil, fmt.Errorf("unknown export status, job id: %d", jobID)
+	}
+
+	return status, nil
 }
 
 func (e *Export) CheckStatus(id int) (*ExportStatus, error) {
@@ -75,5 +117,40 @@ func (e *Export) DownloadExportData(id int) ([][]string, error) {
 		}
 
 		return data, nil
+	}
+}
+
+func (e *Export) copyIO(source io.Reader, destination io.Writer) error {
+	buf := make([]byte, bufferSize)
+
+	for {
+		n, err := source.Read(buf)
+		if err != nil && err != io.EOF {
+			return err
+		}
+		if n == 0 {
+			break
+		}
+
+		if _, err := destination.Write(buf[:n]); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (e *Export) DownloadExportToIO(id int, stream io.Writer) error {
+	r := &Request{
+		Path:   fmt.Sprintf("/v2/export/%d/data", id),
+		Method: requestGet,
+	}
+
+	if responseStream, err := e.client.SendIO(r); err != nil {
+		return err
+	} else {
+		defer func() { _ = responseStream.Close() }()
+
+		return e.copyIO(responseStream, stream)
 	}
 }
