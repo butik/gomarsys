@@ -34,6 +34,8 @@ const (
 	PlatformOriginAll             = "all"
 	PlatformDefaultOriginID       = "0"
 	ExportDistributionMethodLocal = "local"
+
+	defaultCSVDelimiter = ","
 )
 
 type Users struct {
@@ -475,6 +477,7 @@ func (u *Users) GetSegmentLocally(segmentID int, fields []int) (*ExportResult, e
 			DistributionMethod:  ExportDistributionMethodLocal,
 			ContactFields:       fields,
 			AddFieldNamesHeader: 1,
+			Delimiter:           defaultCSVDelimiter,
 		},
 		Filter: segmentID,
 	})
@@ -486,6 +489,7 @@ func (u *Users) GetAllChangesLocally(startTime, endTime time.Time, fields []int)
 			DistributionMethod:  ExportDistributionMethodLocal,
 			ContactFields:       fields,
 			AddFieldNamesHeader: 1,
+			Delimiter:           defaultCSVDelimiter,
 		},
 		Origin: PlatformOriginAll,
 		TimeRange: []string{
